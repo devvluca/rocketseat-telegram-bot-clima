@@ -1,0 +1,11 @@
+# Variáveis de ambiente com credenciais reais
+.env
+*.env
+!.env.example
+
+# Dados locais do container N8N
+n8n_data/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db

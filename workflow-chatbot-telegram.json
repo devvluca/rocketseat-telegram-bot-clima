@@ -1,0 +1,337 @@
+{
+  "name": "Chatbot Telegram Clima - OpenWeather",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger-node",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        340
+      ],
+      "webhookId": "weather-bot-telegram-trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_credentials",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assignment-queue",
+              "name": "queue",
+              "value": "={{ $json.message.text.trim().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s*,\\s*/g, ',') }}",
+              "type": "string"
+            },
+            {
+              "id": "assignment-chatId",
+              "name": "chatId",
+              "value": "={{ $json.message.chat.id }}",
+              "type": "number"
+            },
+            {
+              "id": "assignment-rawText",
+              "name": "rawText",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-input-node",
+      "name": "Captura e Formatação da Entrada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.openweathermap.org/data/2.5/weather",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.queue }}"
+            },
+            {
+              "name": "queue",
+              "value": "={{ $json.queue }}"
+            },
+            {
+              "name": "units",
+              "value": "metric"
+            },
+            {
+              "name": "lang",
+              "value": "pt_br"
+            },
+            {
+              "name": "appid",
+              "value": "={{ $env.OPENWEATHER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-openweather-node",
+      "name": "Consulta OpenWeather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        340
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cod-check-condition",
+              "leftValue": "={{ Number($json.cod) }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "temp-check-condition",
+              "leftValue": "={{ $json.main?.temp }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-valid-response-node",
+      "name": "Validação da Resposta",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extração e formatação determinística dos dados (Fallback obrigatório)\nconst temp = Math.round($json.main.temp);\nconst cityName = $json.name || $('Captura e Formatação da Entrada').first().json.rawText;\nconst chatId = $('Captura e Formatação da Entrada').first().json.chatId;\nconst defaultMessage = `🌤️ A temperatura em ${cityName} é de ${temp}°C.`;\n\nreturn {\n  json: {\n    chatId: chatId,\n    cidade: cityName,\n    temperatura: temp,\n    message: defaultMessage,\n    fallbackMessage: defaultMessage,\n    geminiPrompt: `Reescreva a seguinte mensagem sobre clima em tom curto, claro, amigável e natural em português: \"${defaultMessage}\". Responda estritamente em formato JSON: {\"message\": \"...\", \"ok\": true}`\n  }\n};"
+      },
+      "id": "deterministic-fallback-node",
+      "name": "Formatação da Resposta (Fallback)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{ JSON.stringify($json.geminiPrompt) }}\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "google-gemini-optional-node",
+      "name": "Google Gemini (Opcional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrai resposta do Gemini se disponível; caso contrário, usa o fallback determinístico garantido\nconst fallbackMsg = $('Formatação da Resposta (Fallback)').first().json.fallbackMessage;\nconst chatId = $('Captura e Formatação da Entrada').first().json.chatId;\nlet finalMessage = fallbackMsg;\n\ntry {\n  const candidates = $json.candidates;\n  if (candidates && candidates[0]?.content?.parts[0]?.text) {\n    const geminiText = candidates[0].content.parts[0].text.trim();\n    const parsed = JSON.parse(geminiText);\n    if (parsed.message && typeof parsed.message === 'string') {\n      finalMessage = parsed.message;\n    } else {\n      finalMessage = geminiText;\n    }\n  }\n} catch (err) {\n  // Em caso de chave vazia ou erro na resposta do Gemini, mantém o fallback\n  finalMessage = fallbackMsg;\n}\n\nreturn {\n  json: {\n    chatId: chatId,\n    message: finalMessage\n  }\n};"
+      },
+      "id": "process-final-message-node",
+      "name": "Processar Mensagem Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-send-success-node",
+      "name": "Telegram: Enviar Sucesso",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        240
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_credentials",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Captura e Formatação da Entrada').first().json.chatId }}",
+        "text": "❌ Cidade não encontrada. Use o formato Cidade,UF,BR (ex.: São Paulo,SP,BR).",
+        "additionalFields": {}
+      },
+      "id": "telegram-send-error-node",
+      "name": "Telegram: Enviar Erro",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1180,
+        460
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_credentials",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Captura e Formatação da Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Captura e Formatação da Entrada": {
+      "main": [
+        [
+          {
+            "node": "Consulta OpenWeather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consulta OpenWeather": {
+      "main": [
+        [
+          {
+            "node": "Validação da Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validação da Resposta": {
+      "main": [
+        [
+          {
+            "node": "Formatação da Resposta (Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Enviar Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatação da Resposta (Fallback)": {
+      "main": [
+        [
+          {
+            "node": "Google Gemini (Opcional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini (Opcional)": {
+      "main": [
+        [
+          {
+            "node": "Processar Mensagem Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Mensagem Final": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Enviar Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

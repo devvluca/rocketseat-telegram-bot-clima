@@ -1,0 +1,28 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n-chatbot-clima
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Variáveis de ambiente requeridas para os nós do workflow
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # Opcional (Bônus Google Gemini)
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Caso utilize webhook público no Telegram Trigger com túnel (ngrok, cloudflared, localtunnel)
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
